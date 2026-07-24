@@ -39,9 +39,11 @@ fn run_server() {
 
     // Initialize our responder using a builder.
     let builder = Builder::new(PARAMS.clone());
-    let static_key = builder.generate_keypair().unwrap().private;
+    // Hold onto the whole `Keypair` rather than moving the private key out of it, so the
+    // private key gets zeroized when it goes out of scope.
+    let keypair = builder.generate_keypair().unwrap();
     let mut noise = builder
-        .local_private_key(&static_key)
+        .local_private_key(&keypair.private)
         .unwrap()
         .psk(3, SECRET)
         .unwrap()
@@ -78,9 +80,11 @@ fn run_client() {
 
     // Initialize our initiator using a builder.
     let builder = Builder::new(PARAMS.clone());
-    let static_key = builder.generate_keypair().unwrap().private;
+    // Hold onto the whole `Keypair` rather than moving the private key out of it, so the
+    // private key gets zeroized when it goes out of scope.
+    let keypair = builder.generate_keypair().unwrap();
     let mut noise = builder
-        .local_private_key(&static_key)
+        .local_private_key(&keypair.private)
         .unwrap()
         .psk(3, SECRET)
         .unwrap()

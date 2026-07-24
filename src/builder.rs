@@ -15,10 +15,28 @@ use crate::{
     utils::Toggle,
 };
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A keypair object returned by [`Builder::generate_keypair()`]
 ///
 /// [`generate_keypair()`]: #method.generate_keypair
+///
+/// The private key is zeroized when the `Keypair` is dropped, so it doesn't linger in freed
+/// heap memory. [`Zeroize`] is also implemented if you want to wipe it earlier, and the
+/// [`ZeroizeOnDrop`] marker is implemented so callers can assert the guarantee statically.
+///
+/// Because zeroization needs a destructor, a `Keypair` can no longer be destructured or have
+/// its fields moved out. If you were relying on that, take the fields instead:
+///
+/// ```
+/// # use snow::Keypair;
+/// # let mut keypair = Keypair { private: vec![1; 32], public: vec![2; 32] };
+/// let private = core::mem::take(&mut keypair.private);
+/// let public = core::mem::take(&mut keypair.public);
+/// ```
+///
+/// Note that taking the private key out this way moves the secret into a `Vec` that snow no
+/// longer wipes — wrap it in [`zeroize::Zeroizing`] if you need it to stay covered.
 pub struct Keypair {
     /// The private asymmetric key
     pub private: Vec<u8>,
@@ -34,6 +52,26 @@ impl PartialEq for Keypair {
         (priv_eq & pub_eq).into()
     }
 }
+
+impl Zeroize for Keypair {
+    /// Wipe the private key. The public key isn't secret and is left alone.
+    ///
+    /// This is "best effort" in the same sense as [`Zeroize`] for [`Vec`]: it clears the
+    /// vector's full capacity, but can't reach buffers left behind by an earlier
+    /// reallocation. `generate_keypair` allocates `private` at its final length and never
+    /// grows it, so a `Keypair` from snow has no such stale buffers.
+    fn zeroize(&mut self) {
+        self.private.zeroize();
+    }
+}
+
+impl Drop for Keypair {
+    fn drop(&mut self) {
+        self.zeroize();
+    }
+}
+
+impl ZeroizeOnDrop for Keypair {}
 
 /// Generates a [`HandshakeState`] and also validates that all the prerequisites for
 /// the given parameters are satisfied.
@@ -321,6 +359,42 @@ mod tests {
             .local_private_key(&[0_u8; 32])?
             .build_initiator()?;
         Ok(())
+    }
+
+    // `needs_drop::<Keypair>()` would be vacuous here — the two `Vec`s already require a
+    // destructor whether or not the zeroizing `Drop` exists. The `ZeroizeOnDrop` bound below
+    // is the real guard: removing the impl makes this fail to compile.
+    fn assert_zeroize_on_drop<T: ZeroizeOnDrop>() {}
+
+    #[test]
+    fn test_keypair_advertises_zeroize_on_drop() {
+        assert_zeroize_on_drop::<Keypair>();
+    }
+
+    /// Guard the field coverage of the wipe: the private key must be cleared, and the public
+    /// key — which isn't secret — must be left intact for callers who still need it.
+    #[test]
+    fn test_keypair_zeroize_clears_only_the_private_key() {
+        let mut keypair = Keypair { private: vec![0x24; 32], public: vec![0x42; 32] };
+        keypair.zeroize();
+        assert!(
+            keypair.private.iter().all(|&b| b == 0),
+            "the private key must be wiped, found {:?}",
+            keypair.private
+        );
+        assert_eq!(keypair.public, vec![0x42; 32], "the public key should be untouched");
+    }
+
+    /// The documented migration for code that used to destructure a `Keypair`. This exists to
+    /// keep that escape hatch compiling, since a destructor is what took the old one away.
+    #[test]
+    fn test_keypair_fields_can_still_be_taken() {
+        let mut keypair = Keypair { private: vec![0x24; 32], public: vec![0x42; 32] };
+        let private = core::mem::take(&mut keypair.private);
+        let public = core::mem::take(&mut keypair.public);
+        assert_eq!(private, vec![0x24; 32]);
+        assert_eq!(public, vec![0x42; 32]);
+        assert!(keypair.private.is_empty(), "the key was moved out of the original");
     }
 
     #[test]

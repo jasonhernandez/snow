@@ -626,9 +626,9 @@ fn test_read_buffer_issues() -> TestResult {
     let mut h_r = builder_r.local_private_key(&keypair_r.private)?.build_responder()?;
 
     let builder_i = snow::Builder::new(params);
-    let key_i = builder_i.generate_keypair()?.private;
+    let keypair_i = builder_i.generate_keypair()?;
     let mut h_i = builder_i
-        .local_private_key(&key_i)?
+        .local_private_key(&keypair_i.private)?
         .remote_public_key(&keypair_r.public)?
         .build_initiator()?;
 
