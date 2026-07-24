@@ -7,7 +7,7 @@ use alloc::{boxed::Box, vec, vec::Vec};
 use crate::params::HandshakeModifier;
 use crate::{
     cipherstate::{CipherState, CipherStates},
-    constants::{MAXDHLEN, PSKLEN},
+    constants::{MAX_PSKS, MAXDHLEN, PSKLEN},
     error::{Error, InitStage, Prerequisite},
     handshakestate::HandshakeState,
     params::NoiseParams,
@@ -15,9 +15,6 @@ use crate::{
     utils::Toggle,
 };
 use subtle::ConstantTimeEq;
-
-/// The maximum number of PSKs we will allocate for.
-const MAX_PSKS: usize = 10;
 
 /// A keypair object returned by [`Builder::generate_keypair()`]
 ///

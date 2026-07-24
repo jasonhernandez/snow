@@ -47,6 +47,15 @@ use crate::{
 };
 #[cfg(any(feature = "use-aes-gcm", feature = "use-chacha20poly1305", feature = "use-xchacha20poly1305"))]
 use crate::constants::TAGLEN;
+// Only the primitives that hold raw secret key material need this.
+#[cfg(any(
+    feature = "use-curve25519",
+    feature = "p256",
+    feature = "use-aes-gcm",
+    feature = "use-chacha20poly1305",
+    feature = "use-xchacha20poly1305"
+))]
+use zeroize::Zeroize;
 
 // NB: Intentionally private so RNG details aren't leaked into
 // the public API.
@@ -200,6 +209,10 @@ struct HashBlake3 {
 }
 
 /// Wraps `kyber1024`'s implementation
+///
+// NB: unlike the primitives below, `kyber1024::SecretKey` is an opaque type from `pqcrypto`
+// that exposes no mutable access to its bytes, so snow can't add zeroize-on-drop for the KEM
+// private key. Same situation as ring's `LessSafeKey`.
 #[cfg(feature = "use-pqcrypto-kyber1024")]
 struct Kyber1024 {
     privkey: kyber1024::SecretKey,
@@ -211,7 +224,6 @@ struct Kyber1024 {
 #[cfg(feature = "use-curve25519")]
 impl Drop for Dh25519 {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
         self.privkey.zeroize();
     }
 }
@@ -219,7 +231,6 @@ impl Drop for Dh25519 {
 #[cfg(feature = "p256")]
 impl Drop for P256 {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
         self.privkey.zeroize();
     }
 }
@@ -227,7 +238,6 @@ impl Drop for P256 {
 #[cfg(feature = "use-aes-gcm")]
 impl Drop for CipherAesGcm {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
         self.key.zeroize();
     }
 }
@@ -235,7 +245,6 @@ impl Drop for CipherAesGcm {
 #[cfg(feature = "use-chacha20poly1305")]
 impl Drop for CipherChaChaPoly {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
         self.key.zeroize();
     }
 }
@@ -243,7 +252,6 @@ impl Drop for CipherChaChaPoly {
 #[cfg(feature = "use-xchacha20poly1305")]
 impl Drop for CipherXChaChaPoly {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
         self.key.zeroize();
     }
 }
@@ -1080,29 +1088,57 @@ mod tests {
         }
     }
 
-    // `snow` forbids `unsafe`, so we can't inspect freed memory to prove the key
-    // is gone after drop. Instead, confirm the secret field the `Drop` impl wipes
-    // is the one that actually holds the key and that `zeroize` clears it, guarding
-    // against the field being renamed or retyped without updating the destructor.
+    // Zeroization is verified from two angles, because `snow` forbids `unsafe` and so can't
+    // inspect freed memory to prove a key is gone:
+    //
+    //   1. `needs_drop` — every one of these types is a plain aggregate of arrays that drops
+    //      nothing by itself, so `needs_drop` is true *only* while a manual `Drop` impl is
+    //      present. Deleting a destructor therefore fails these tests instead of silently
+    //      dropping the guarantee.
+    //   2. field identity — the destructor has to wipe the field that actually holds the
+    //      secret, so renaming or retyping that field without updating `Drop` fails too.
+    //
+    // The transitive chain (dropping a `TransportState` reaches these leaves) is covered by
+    // `test_transport_drop_wipes_cipher_keys` in `tests/general.rs`.
+
+    fn assert_has_destructor<T>() {
+        assert!(
+            core::mem::needs_drop::<T>(),
+            "{} lost its Drop impl, so its key material is no longer zeroized",
+            core::any::type_name::<T>()
+        );
+    }
+
+    #[test]
+    fn test_secret_holding_primitives_have_destructors() {
+        #[cfg(feature = "use-aes-gcm")]
+        assert_has_destructor::<CipherAesGcm>();
+        #[cfg(feature = "use-chacha20poly1305")]
+        assert_has_destructor::<CipherChaChaPoly>();
+        #[cfg(feature = "use-xchacha20poly1305")]
+        assert_has_destructor::<CipherXChaChaPoly>();
+        #[cfg(feature = "use-curve25519")]
+        assert_has_destructor::<Dh25519>();
+        #[cfg(feature = "p256")]
+        assert_has_destructor::<P256>();
+    }
 
     #[test]
     #[cfg(feature = "use-chacha20poly1305")]
-    fn test_chachapoly_key_zeroizes() {
-        use zeroize::Zeroize;
+    fn test_chachapoly_key_field_is_the_secret() {
         let mut cipher = CipherChaChaPoly::default();
         cipher.set(&[0x24; CIPHERKEYLEN]);
-        assert_eq!(cipher.key, [0x24; CIPHERKEYLEN]);
+        assert_eq!(cipher.key, [0x24; CIPHERKEYLEN], "`key` is the field Drop wipes");
         cipher.key.zeroize();
         assert_eq!(cipher.key, [0_u8; CIPHERKEYLEN]);
     }
 
     #[test]
     #[cfg(feature = "use-curve25519")]
-    fn test_curve25519_privkey_zeroizes() {
-        use zeroize::Zeroize;
+    fn test_curve25519_privkey_field_is_the_secret() {
         let mut dh = Dh25519::default();
         dh.set(&[0x24; 32]);
-        assert_eq!(dh.privkey, [0x24; 32]);
+        assert_eq!(dh.privkey, [0x24; 32], "`privkey` is the field Drop wipes");
         dh.privkey.zeroize();
         assert_eq!(dh.privkey, [0_u8; 32]);
     }

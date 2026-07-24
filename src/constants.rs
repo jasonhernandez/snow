@@ -2,6 +2,9 @@ pub const PSKLEN: usize = 32;
 pub const CIPHERKEYLEN: usize = 32;
 pub const TAGLEN: usize = 16;
 
+/// The maximum number of pre-shared keys a handshake can carry (`psk0` through `psk9`).
+pub const MAX_PSKS: usize = 10;
+
 pub const MAXHASHLEN: usize = 64;
 pub const MAXBLOCKLEN: usize = 128;
 pub const MAXMSGLEN: usize = 65535;

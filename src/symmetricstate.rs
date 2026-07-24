@@ -7,6 +7,7 @@ use crate::{
     error::Error,
     types::Hash,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Copy, Clone)]
 pub(crate) struct SymmetricStateData {
@@ -18,6 +19,17 @@ pub(crate) struct SymmetricStateData {
 impl Default for SymmetricStateData {
     fn default() -> Self {
         SymmetricStateData { h: [0_u8; MAXHASHLEN], ck: [0_u8; MAXHASHLEN], has_key: false }
+    }
+}
+
+// `SymmetricStateData` stays `Copy` (it's snapshotted on every message), so it can't have a
+// `Drop` of its own. Implementing `Zeroize` instead lets the snapshots be held in a
+// `Zeroizing` wrapper, which does wipe them when they go out of scope.
+impl Zeroize for SymmetricStateData {
+    fn zeroize(&mut self) {
+        self.ck.zeroize();
+        self.h.zeroize();
+        self.has_key = false;
     }
 }
 
@@ -46,18 +58,15 @@ impl SymmetricState {
 
     pub fn mix_key(&mut self, data: &[u8]) {
         let hash_len = self.hasher.hash_len();
-        let mut hkdf_output = ([0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN]);
-        self.hasher.hkdf(
-            &self.inner.ck[..hash_len],
-            data,
-            2,
-            &mut hkdf_output.0,
-            &mut hkdf_output.1,
-            &mut [],
-        );
+        // `hkdf_output.0` is the next chaining key and `hkdf_output.1` carries the cipher key,
+        // so these buffers hold secret material and are wiped when they leave scope.
+        let mut hkdf_output = Zeroizing::new(([0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN]));
+        // Deref the wrapper once; splitting the borrow through `DerefMut` twice won't compile.
+        let out = &mut *hkdf_output;
+        self.hasher.hkdf(&self.inner.ck[..hash_len], data, 2, &mut out.0, &mut out.1, &mut []);
 
         // TODO(mcginty): use `split_array_ref` once stable to avoid memory inefficiency
-        let mut cipher_key = [0_u8; CIPHERKEYLEN];
+        let mut cipher_key = Zeroizing::new([0_u8; CIPHERKEYLEN]);
         cipher_key.copy_from_slice(&hkdf_output.1[..CIPHERKEYLEN]);
 
         self.inner.ck = hkdf_output.0;
@@ -75,20 +84,15 @@ impl SymmetricState {
 
     pub fn mix_key_and_hash(&mut self, data: &[u8]) {
         let hash_len = self.hasher.hash_len();
-        let mut hkdf_output = ([0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN]);
-        self.hasher.hkdf(
-            &self.inner.ck[..hash_len],
-            data,
-            3,
-            &mut hkdf_output.0,
-            &mut hkdf_output.1,
-            &mut hkdf_output.2,
-        );
+        let mut hkdf_output =
+            Zeroizing::new(([0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN]));
+        let out = &mut *hkdf_output;
+        self.hasher.hkdf(&self.inner.ck[..hash_len], data, 3, &mut out.0, &mut out.1, &mut out.2);
         self.inner.ck = hkdf_output.0;
         self.mix_hash(&hkdf_output.1[..hash_len]);
 
         // TODO(mcginty): use `split_array_ref` once stable to avoid memory inefficiency
-        let mut cipher_key = [0_u8; CIPHERKEYLEN];
+        let mut cipher_key = Zeroizing::new([0_u8; CIPHERKEYLEN]);
         cipher_key.copy_from_slice(&hkdf_output.2[..CIPHERKEYLEN]);
         self.cipherstate.set(&cipher_key, 0);
     }
@@ -130,11 +134,16 @@ impl SymmetricState {
     }
 
     pub fn split(&mut self, child1: &mut CipherState, child2: &mut CipherState) {
-        let mut hkdf_output = ([0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN]);
-        self.split_raw(&mut hkdf_output.0, &mut hkdf_output.1);
+        // These buffers hold both transport keys, which is the material the resulting
+        // `TransportState` exists to protect, so don't leave copies behind on the stack.
+        let mut hkdf_output = Zeroizing::new(([0_u8; MAXHASHLEN], [0_u8; MAXHASHLEN]));
+        {
+            let out = &mut *hkdf_output;
+            self.split_raw(&mut out.0, &mut out.1);
+        }
 
         // TODO(mcginty): use `split_array_ref` once stable to avoid memory inefficiency
-        let mut cipher_keys = ([0_u8; CIPHERKEYLEN], [0_u8; CIPHERKEYLEN]);
+        let mut cipher_keys = Zeroizing::new(([0_u8; CIPHERKEYLEN], [0_u8; CIPHERKEYLEN]));
         cipher_keys.0.copy_from_slice(&hkdf_output.0[..CIPHERKEYLEN]);
         cipher_keys.1.copy_from_slice(&hkdf_output.1[..CIPHERKEYLEN]);
         child1.set(&cipher_keys.0, 0);
@@ -146,12 +155,21 @@ impl SymmetricState {
         self.hasher.hkdf(&self.inner.ck[..hash_len], &[0_u8; 0], 2, out1, out2, &mut []);
     }
 
-    pub(crate) fn checkpoint(&mut self) -> SymmetricStateData {
-        self.inner
+    /// Snapshot the hash and chaining key so a partially-processed message can be rolled back.
+    ///
+    /// The snapshot contains the chaining key, so it's handed back in a `Zeroizing` wrapper to
+    /// be wiped when the caller drops it instead of being left behind on the stack. This is
+    /// taken on every message, so it's the most frequently created copy of the chaining key.
+    pub(crate) fn checkpoint(&mut self) -> Zeroizing<SymmetricStateData> {
+        Zeroizing::new(self.inner)
     }
 
-    pub(crate) fn restore(&mut self, checkpoint: SymmetricStateData) {
-        self.inner = checkpoint;
+    /// Roll back to a snapshot taken by [`Self::checkpoint`].
+    ///
+    /// Takes the snapshot by reference so restoring doesn't produce another unwiped copy;
+    /// the state being overwritten is wiped by `SymmetricState`'s own `Drop`.
+    pub(crate) fn restore(&mut self, checkpoint: &SymmetricStateData) {
+        self.inner = *checkpoint;
     }
 
     pub fn handshake_hash(&self) -> &[u8] {
@@ -162,9 +180,29 @@ impl SymmetricState {
 
 impl Drop for SymmetricState {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
         // The chaining key is secret key material; the hash isn't, but wiping it is cheap.
-        self.inner.ck.zeroize();
-        self.inner.h.zeroize();
+        self.inner.zeroize();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Unlike the leaf primitives in `resolvers::default`, `SymmetricState` can't be guarded
+    // with `needs_drop` — it owns a `Box<dyn Hash>` and a `CipherState`, so `needs_drop` is
+    // true whether or not the manual `Drop` below exists, which makes the assertion vacuous.
+    // What's left to guard is the field coverage of the wipe itself.
+
+    /// Guard the field list of `SymmetricStateData`: if a new secret field is added without
+    /// being wiped here, or `ck`/`h` are renamed, this fails rather than silently leaking.
+    #[test]
+    fn test_symmetricstatedata_zeroize_clears_all_fields() {
+        let mut data =
+            SymmetricStateData { h: [0x24; MAXHASHLEN], ck: [0x42; MAXHASHLEN], has_key: true };
+        data.zeroize();
+        assert_eq!(data.ck, [0_u8; MAXHASHLEN]);
+        assert_eq!(data.h, [0_u8; MAXHASHLEN]);
+        assert!(!data.has_key);
     }
 }
