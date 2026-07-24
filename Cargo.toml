@@ -31,12 +31,19 @@ default-resolver-crypto = [
     "use-getrandom",
 ]
 nightly = ["blake2/simd_opt", "subtle/nightly"]
+
+# Neither _ring_ nor _aws-lc-rs_ provides BLAKE2 or X25519 (with APIs `snow` can use at least), so the
+# `-accelerated` features enable those to ensure any default-supported pattern will still work while
+# compiling minimal RustCrypto dependencies otherwise. This is preferred over needing to also enable
+# `default-resolver-crypto` when many of the crates won't be used at runtime.
+#
+# ring provider
 ring-resolver = ["ring"]
-# _ring_ doesn't provide BLAKE2 or X25519 (with APIs `snow` can use at least), so enable those
-# to ensure any default-supported pattern will still work while compiling minimal RustCrypto dependencies otherwise.
-# This is preferred over needing to also enable `default-resolver-crypto` when many of the crates won't be used
-# at runtime.
 ring-accelerated = ["ring-resolver", "default-resolver", "use-blake2", "use-curve25519"]
+# aws-lc-rs provider
+aws-lc-rs-resolver = ["aws-lc-rs"]
+aws-lc-rs-accelerated = ["aws-lc-rs-resolver", "default-resolver", "use-blake2", "use-curve25519"]
+
 vector-tests = []
 hfs = []
 risky-raw-split = []
@@ -100,6 +107,9 @@ pqcrypto-traits = { version = "0.3", optional = true }
 # ring crypto provider
 ring = { version = "0.17.12", optional = true }
 
+# aws-lc-rs crypto provider
+aws-lc-rs = { version = "1.13", optional = true }
+
 [dev-dependencies]
 criterion = "0.8"
 serde = "1.0"
@@ -116,7 +126,7 @@ rustc_version = "0.4"
 opt-level = 1
 
 [package.metadata.docs.rs]
-features = ["ring-resolver"]
+features = ["ring-resolver", "aws-lc-rs-resolver"]
 all-features = false
 no-default-features = false
 

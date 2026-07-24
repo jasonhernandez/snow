@@ -13,7 +13,7 @@
 //! ```
 //! # use snow::Error;
 //! #
-//! # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated"))]
+//! # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
 //! # fn try_main() -> Result<(), Error> {
 //! static PATTERN: &'static str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 //!
@@ -43,7 +43,7 @@
 //! #     Ok(())
 //! # }
 //! #
-//! # #[cfg(not(any(feature = "default-resolver-crypto", feature = "ring-accelerated")))]
+//! # #[cfg(not(any(feature = "default-resolver-crypto", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated")))]
 //! # fn try_main() -> Result<(), ()> { Ok(()) }
 //! #
 //! # fn main() {
@@ -60,17 +60,34 @@
 //!
 //! ### Other Providers
 //!
+//! Snow can optionally use a native crypto backend for acceleration. Two are supported,
+//! and you can choose whichever you prefer:
+//!
 //! #### ring
 //!
 //! [ring](https://github.com/briansmith/ring) is a crypto library based off of BoringSSL
 //! and is significantly faster than most of the pure-Rust implementations.
 //!
 //! If you enable the `ring-resolver` feature, Snow will include a `resolvers::ring` module
-//! as well as a `RingAcceleratedResolver` available to be used with
-//! `Builder::with_resolver()`.
+//! as well as a `RingResolver` available to be used with `Builder::with_resolver()`.
 //!
 //! If you enable the `ring-accelerated` feature, Snow will default to choosing `ring`'s
 //! crypto implementations when available.
+//!
+//! #### aws-lc-rs
+//!
+//! [aws-lc-rs](https://github.com/aws/aws-lc-rs) is a crypto library based off of AWS-LC
+//! and is significantly faster than most of the pure-Rust implementations.
+//!
+//! If you enable the `aws-lc-rs-resolver` feature, Snow will include a `resolvers::aws_lc_rs`
+//! module as well as an `AwsLcRsResolver` available to be used with
+//! `Builder::with_resolver()`.
+//!
+//! If you enable the `aws-lc-rs-accelerated` feature, Snow will default to choosing
+//! `aws-lc-rs`'s crypto implementations when available.
+//!
+//! Note: `ring-accelerated` and `aws-lc-rs-accelerated` are mutually exclusive (they both
+//! provide the default `Builder::new` accelerated resolver); enable at most one.
 //!
 //! ### Resolver primitives supported
 //!
@@ -131,22 +148,32 @@ extern crate alloc;
     not(any(
         feature = "use-aes-gcm",
         feature = "use-chacha20poly1305",
-        // `default-resolver` and `ring-resolver` may be enabled at the same time
-        // when using the `ring-accelerated` feature. _ring_ provides AES-GCM and
-        // ChaChaPoly-1305 too, which are the only two required ciphers.
+        // `default-resolver` and an accelerated resolver may be enabled at the same time
+        // when using the `ring-accelerated`/`aws-lc-rs-accelerated` feature. Both _ring_ and
+        // _aws-lc-rs_ provide AES-GCM and ChaChaPoly-1305 too, which are the only two required
+        // ciphers.
         feature = "ring-resolver",
+        feature = "aws-lc-rs-resolver",
         feature = "use-xchacha20poly1305"
     )),
     not(any(
         feature = "use-sha2",
         feature = "use-blake2",
         feature = "use-blake3",
-        feature = "ring-resolver"
+        feature = "ring-resolver",
+        feature = "aws-lc-rs-resolver"
     ))
 ))]
 compile_error!(
     "Valid selection of crypto primitived must be enabled when using feature 'default-resolver'.
     Enable at least one DH feature, one Cipher feature and one Hash feature. Check README.md for details."
+);
+
+// The two accelerated backends both provide the default `Builder::new` resolver, so only one
+// may be selected at a time. The individual `-resolver` features can still coexist.
+#[cfg(all(feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
+compile_error!(
+    "features 'ring-accelerated' and 'aws-lc-rs-accelerated' are mutually exclusive; enable at most one."
 );
 
 macro_rules! copy_slices {

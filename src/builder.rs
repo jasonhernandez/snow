@@ -48,7 +48,7 @@ impl PartialEq for Keypair {
 /// # use snow::Builder;
 /// # let my_long_term_key = [0u8; 32];
 /// # let their_pub_key = [0u8; 32];
-/// # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated"))]
+/// # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
 /// let noise = Builder::new("Noise_XX_25519_ChaChaPoly_BLAKE2s".parse()?)
 ///     .local_private_key(&my_long_term_key)?
 ///     .remote_public_key(&their_pub_key)?
@@ -75,7 +75,11 @@ impl Debug for Builder<'_> {
 
 impl<'builder> Builder<'builder> {
     /// Create a Builder with the default crypto resolver.
-    #[cfg(all(feature = "default-resolver", not(feature = "ring-accelerated")))]
+    #[cfg(all(
+        feature = "default-resolver",
+        not(feature = "ring-accelerated"),
+        not(feature = "aws-lc-rs-accelerated")
+    ))]
     #[must_use]
     pub fn new(params: NoiseParams) -> Self {
         use crate::resolvers::DefaultResolver;
@@ -91,6 +95,17 @@ impl<'builder> Builder<'builder> {
         Self::with_resolver(
             params,
             Box::new(FallbackResolver::new(Box::new(RingResolver), Box::new(DefaultResolver))),
+        )
+    }
+
+    /// Create a Builder with the aws-lc-rs resolver and default resolver as a fallback.
+    #[cfg(all(feature = "aws-lc-rs-accelerated", not(feature = "ring-accelerated")))]
+    pub fn new(params: NoiseParams) -> Self {
+        use crate::resolvers::{AwsLcRsResolver, DefaultResolver, FallbackResolver};
+
+        Self::with_resolver(
+            params,
+            Box::new(FallbackResolver::new(Box::new(AwsLcRsResolver), Box::new(DefaultResolver))),
         )
     }
 
@@ -311,7 +326,11 @@ impl<'builder> Builder<'builder> {
 #[cfg(test)]
 #[cfg(all(
     feature = "std",
-    any(feature = "default-resolver-crypto", feature = "ring-accelerated")
+    any(
+        feature = "default-resolver-crypto",
+        feature = "ring-accelerated",
+        feature = "aws-lc-rs-accelerated"
+    )
 ))]
 mod tests {
     use super::*;
