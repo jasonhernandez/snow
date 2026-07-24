@@ -58,6 +58,14 @@
 //! it chooses select, artisanal pure-Rust implementations (see `Cargo.toml` for a quick
 //! overview).
 //!
+//! ## Zeroization
+//!
+//! When using the `default-resolver`, secret key material (cipher keys, DH private keys,
+//! the symmetric chaining key, and PSKs) is zeroized on drop, so it doesn't linger in freed
+//! memory after a session ends. The `ring` ciphers keep their keys inside ring's own opaque
+//! key type and manage that memory themselves, so this guarantee applies to the
+//! `default-resolver` primitives.
+//!
 //! ### Other Providers
 //!
 //! #### ring

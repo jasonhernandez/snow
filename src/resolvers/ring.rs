@@ -65,6 +65,9 @@ impl Random for RingRng {
     }
 }
 
+// NB: unlike the default resolver, these ciphers hold their key inside ring's opaque
+// `LessSafeKey`, which owns and manages that memory itself, so snow can't add its own
+// zeroize-on-drop here. Zeroization of key material is a property of the default resolver.
 struct CipherAESGCM {
     // NOTE: LessSafeKey is chosen here because nonce atomicity is handled outside of this structure.
     // See ring documentation for more details on the naming choices.

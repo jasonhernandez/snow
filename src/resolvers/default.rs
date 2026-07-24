@@ -206,6 +206,48 @@ struct Kyber1024 {
     pubkey: kyber1024::PublicKey,
 }
 
+// Zeroize secret key material on drop so it can't linger in freed memory.
+
+#[cfg(feature = "use-curve25519")]
+impl Drop for Dh25519 {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.privkey.zeroize();
+    }
+}
+
+#[cfg(feature = "p256")]
+impl Drop for P256 {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.privkey.zeroize();
+    }
+}
+
+#[cfg(feature = "use-aes-gcm")]
+impl Drop for CipherAesGcm {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
+#[cfg(feature = "use-chacha20poly1305")]
+impl Drop for CipherChaChaPoly {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
+#[cfg(feature = "use-xchacha20poly1305")]
+impl Drop for CipherXChaChaPoly {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.key.zeroize();
+    }
+}
+
 #[cfg(feature = "use-curve25519")]
 impl Dh25519 {
     fn derive_pubkey(&mut self) {
@@ -1036,5 +1078,32 @@ mod tests {
         } else {
             assert!(rng.is_none());
         }
+    }
+
+    // `snow` forbids `unsafe`, so we can't inspect freed memory to prove the key
+    // is gone after drop. Instead, confirm the secret field the `Drop` impl wipes
+    // is the one that actually holds the key and that `zeroize` clears it, guarding
+    // against the field being renamed or retyped without updating the destructor.
+
+    #[test]
+    #[cfg(feature = "use-chacha20poly1305")]
+    fn test_chachapoly_key_zeroizes() {
+        use zeroize::Zeroize;
+        let mut cipher = CipherChaChaPoly::default();
+        cipher.set(&[0x24; CIPHERKEYLEN]);
+        assert_eq!(cipher.key, [0x24; CIPHERKEYLEN]);
+        cipher.key.zeroize();
+        assert_eq!(cipher.key, [0_u8; CIPHERKEYLEN]);
+    }
+
+    #[test]
+    #[cfg(feature = "use-curve25519")]
+    fn test_curve25519_privkey_zeroizes() {
+        use zeroize::Zeroize;
+        let mut dh = Dh25519::default();
+        dh.set(&[0x24; 32]);
+        assert_eq!(dh.privkey, [0x24; 32]);
+        dh.privkey.zeroize();
+        assert_eq!(dh.privkey, [0_u8; 32]);
     }
 }

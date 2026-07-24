@@ -22,6 +22,35 @@ use core::{
     fmt,
 };
 
+/// Pre-shared keys held by the handshake, zeroized on drop.
+///
+/// This is a newtype rather than a plain array because `HandshakeState` can't
+/// implement `Drop` itself (`TransportState::new` moves fields out of it), so
+/// the wipe of this secret material lives on the field instead.
+#[derive(Default)]
+pub(crate) struct Psks([Option<[u8; PSKLEN]>; 10]);
+
+impl core::ops::Deref for Psks {
+    type Target = [Option<[u8; PSKLEN]>; 10];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for Psks {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for Psks {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.0.zeroize();
+    }
+}
+
 /// A state machine encompassing the handshake phase of a Noise session.
 ///
 /// **Note:** you are probably looking for [`Builder`](struct.Builder.html) to
@@ -39,7 +68,7 @@ pub struct HandshakeState {
     pub(crate) re: Toggle<[u8; MAXDHLEN]>,
     pub(crate) initiator: bool,
     pub(crate) params: NoiseParams,
-    pub(crate) psks: [Option<[u8; PSKLEN]>; 10],
+    pub(crate) psks: Psks,
     #[cfg(feature = "hfs")]
     pub(crate) kem: Option<Box<dyn Kem>>,
     #[cfg(feature = "hfs")]
@@ -142,7 +171,7 @@ impl HandshakeState {
             re,
             initiator,
             params,
-            psks: *psks,
+            psks: Psks(*psks),
             #[cfg(feature = "hfs")]
             kem: None,
             #[cfg(feature = "hfs")]

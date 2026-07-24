@@ -159,3 +159,12 @@ impl SymmetricState {
         &self.inner.h[..hash_len]
     }
 }
+
+impl Drop for SymmetricState {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        // The chaining key is secret key material; the hash isn't, but wiping it is cheap.
+        self.inner.ck.zeroize();
+        self.inner.h.zeroize();
+    }
+}
