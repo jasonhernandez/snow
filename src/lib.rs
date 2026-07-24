@@ -75,15 +75,19 @@
 //! - The Kyber1024 KEM private key is an opaque `pqcrypto` type with no mutable byte access.
 //!
 //! [`Keypair`](struct.Keypair.html) — the long-term keypair handed back by
-//! [`Builder::generate_keypair()`](struct.Builder.html#method.generate_keypair) — is *not*
-//! zeroized on drop, because adding a destructor to a public struct would stop callers from
-//! destructuring it. Wrap it in [`zeroize::Zeroizing`] if you need that.
+//! [`Builder::generate_keypair()`](struct.Builder.html#method.generate_keypair) — wipes its
+//! private key on drop as well, and implements `Zeroize` and `ZeroizeOnDrop`. Because that
+//! needs a destructor, a `Keypair` can no longer be destructured or have its fields moved
+//! out; see its documentation for the migration.
 //!
-//! Note that the `Zeroize`/`ZeroizeOnDrop` marker traits are deliberately not implemented for
-//! the public state types. `ZeroizeOnDrop` is a promise that *all* contained secrets are
-//! wiped, which wouldn't be true for a `TransportState` built on the `ring` or `aws-lc-rs`
-//! ciphers, and the resolver is chosen at runtime — so the trait can't be implemented
-//! honestly for the type as a whole.
+//! `ZeroizeOnDrop` is *not* implemented for the session state types
+//! ([`HandshakeState`](struct.HandshakeState.html),
+//! [`TransportState`](struct.TransportState.html) and
+//! [`StatelessTransportState`](struct.StatelessTransportState.html)) even though they do wipe
+//! what they can. The trait promises that *all* contained secrets are zeroized, which isn't
+//! true of a state built on the `ring` or `aws-lc-rs` ciphers, and the resolver is chosen at
+//! runtime — so the promise can't be made honestly for the type as a whole. `Keypair` has no
+//! such caveat, which is why it carries the marker and they don't.
 //!
 //! ### Other Providers
 //!

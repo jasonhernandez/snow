@@ -81,7 +81,8 @@ travis-ci = { repository = "mcginty/snow", branch = "master" }
 
 [dependencies]
 subtle = { version = "2.4", default-features = false }
-zeroize = { version = "1.6", default-features = false }
+# `alloc` is needed for `Zeroize for Vec<u8>` (the `Keypair` private key).
+zeroize = { version = "1.6", default-features = false, features = ["alloc"] }
 
 # default crypto provider
 getrandom = { version = "0.3", optional = true }
