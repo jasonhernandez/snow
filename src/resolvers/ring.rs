@@ -1,3 +1,9 @@
+//! A `ring`-backed resolver.
+//!
+//! NB: `resolvers::aws_lc_rs` is a near-verbatim port of this module (aws-lc-rs exposes a
+//! ring-compatible API surface). The two are meant to stay in lockstep — a fix here almost
+//! certainly belongs there too.
+
 use super::CryptoResolver;
 use crate::{
     constants::{CIPHERKEYLEN, TAGLEN},
@@ -74,7 +80,7 @@ struct CipherAESGCM {
 impl Default for CipherAESGCM {
     fn default() -> Self {
         CipherAESGCM {
-            key: LessSafeKey::new(UnboundKey::new(&aead::AES_256_GCM, &[0u8; 32]).unwrap()),
+            key: LessSafeKey::new(UnboundKey::new(&aead::AES_256_GCM, &[0_u8; 32]).unwrap()),
         }
     }
 }
@@ -89,7 +95,7 @@ impl Cipher for CipherAESGCM {
     }
 
     fn encrypt(&self, nonce: u64, authtext: &[u8], plaintext: &[u8], out: &mut [u8]) -> usize {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_be_bytes(), &mut nonce_bytes[4..]);
 
         out[..plaintext.len()].copy_from_slice(plaintext);
@@ -116,7 +122,7 @@ impl Cipher for CipherAESGCM {
         ciphertext: &[u8],
         out: &mut [u8],
     ) -> Result<usize, Error> {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_be_bytes(), &mut nonce_bytes[4..]);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
@@ -154,7 +160,7 @@ struct CipherChaChaPoly {
 impl Default for CipherChaChaPoly {
     fn default() -> Self {
         Self {
-            key: LessSafeKey::new(UnboundKey::new(&aead::CHACHA20_POLY1305, &[0u8; 32]).unwrap()),
+            key: LessSafeKey::new(UnboundKey::new(&aead::CHACHA20_POLY1305, &[0_u8; 32]).unwrap()),
         }
     }
 }
@@ -169,7 +175,7 @@ impl Cipher for CipherChaChaPoly {
     }
 
     fn encrypt(&self, nonce: u64, authtext: &[u8], plaintext: &[u8], out: &mut [u8]) -> usize {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_le_bytes(), &mut nonce_bytes[4..]);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
@@ -195,7 +201,7 @@ impl Cipher for CipherChaChaPoly {
         ciphertext: &[u8],
         out: &mut [u8],
     ) -> Result<usize, Error> {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_le_bytes(), &mut nonce_bytes[4..]);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
@@ -308,7 +314,7 @@ mod tests {
         let mut samples = BTreeSet::new();
         let mut rng = RingRng::default();
         for _ in 0..100_000 {
-            let mut buf = vec![0u8; 128];
+            let mut buf = vec![0_u8; 128];
             rng.try_fill_bytes(&mut buf).unwrap();
             assert!(samples.insert(buf));
         }

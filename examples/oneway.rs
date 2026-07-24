@@ -1,5 +1,9 @@
 #![cfg_attr(
-    not(any(feature = "default-resolver", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated",)),
+    not(any(
+        feature = "default-resolver",
+        feature = "ring-accelerated",
+        feature = "aws-lc-rs-accelerated"
+    )),
     allow(dead_code, unused_extern_crates, unused_imports)
 )]
 //! This is a barebones TCP Client/Server that establishes a `Noise_X` session, and sends
@@ -30,7 +34,11 @@ static RESPONDER: LazyLock<Keypair> = LazyLock::new(|| Keypair {
         .expect("valid hex"),
 });
 
-#[cfg(any(feature = "default-resolver", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
+#[cfg(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 fn main() {
     let server_mode =
         std::env::args().next_back().is_none_or(|arg| arg == "-s" || arg == "--server");
@@ -43,7 +51,11 @@ fn main() {
     println!("all done.");
 }
 
-#[cfg(any(feature = "default-resolver", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
+#[cfg(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 fn run_server(private_key: &[u8], psk: &[u8; 32]) {
     let mut buf = vec![0_u8; 65535];
 
@@ -79,7 +91,11 @@ fn run_server(private_key: &[u8], psk: &[u8; 32]) {
     println!("connection closed.");
 }
 
-#[cfg(any(feature = "default-resolver", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
+#[cfg(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 fn run_client(responder_public_key: &[u8], psk: &[u8; 32]) {
     let mut buf = vec![0_u8; 65535];
 
@@ -134,7 +150,11 @@ fn send(stream: &mut TcpStream, buf: &[u8]) {
     stream.write_all(buf).unwrap();
 }
 
-#[cfg(not(any(feature = "default-resolver", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated")))]
+#[cfg(not(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+)))]
 fn main() {
     panic!("Example must be compiled with some cryptographic provider.");
 }

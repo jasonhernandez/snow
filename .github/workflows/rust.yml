@@ -35,5 +35,11 @@ jobs:
       - name: Set LIBCLANG_PATH
         if: startsWith(matrix.os, 'windows')
         run: echo "LIBCLANG_PATH=$((gcm clang).source -replace "clang.exe")" >> $env:GITHUB_ENV
+      # aws-lc-sys assembles x86/x86-64 asm with NASM on Windows and fails the build without it.
+      # The alternative is aws-lc-rs's `prebuilt-nasm` feature, but building from source keeps
+      # this consistent with how the rest of the toolchain is set up above.
+      - name: Install NASM (for aws-lc-sys on Windows)
+        if: startsWith(matrix.os, 'windows')
+        uses: ilammy/setup-nasm@v1
       - name: Run tests
         run: mise run test

@@ -13,7 +13,11 @@
 //! ```
 //! # use snow::Error;
 //! #
-//! # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
+//! # #[cfg(any(
+//! #     feature = "default-resolver-crypto",
+//! #     feature = "ring-accelerated",
+//! #     feature = "aws-lc-rs-accelerated"
+//! # ))]
 //! # fn try_main() -> Result<(), Error> {
 //! static PATTERN: &'static str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 //!
@@ -43,7 +47,11 @@
 //! #     Ok(())
 //! # }
 //! #
-//! # #[cfg(not(any(feature = "default-resolver-crypto", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated")))]
+//! # #[cfg(not(any(
+//! #     feature = "default-resolver-crypto",
+//! #     feature = "ring-accelerated",
+//! #     feature = "aws-lc-rs-accelerated"
+//! # )))]
 //! # fn try_main() -> Result<(), ()> { Ok(()) }
 //! #
 //! # fn main() {
@@ -86,24 +94,36 @@
 //! If you enable the `aws-lc-rs-accelerated` feature, Snow will default to choosing
 //! `aws-lc-rs`'s crypto implementations when available.
 //!
-//! Note: `ring-accelerated` and `aws-lc-rs-accelerated` are mutually exclusive (they both
-//! provide the default `Builder::new` accelerated resolver); enable at most one.
+//! Both backends can be enabled at the same time — Cargo features are additive and get unified
+//! across the dependency graph, so two unrelated crates in one build may each ask for a
+//! different one. Since `Builder::new` can only construct one resolver, `ring-accelerated`
+//! takes precedence over `aws-lc-rs-accelerated` when both are enabled. Use
+//! `Builder::with_resolver()` if you need to pick explicitly.
+//!
+//! Note that `aws-lc-rs` is std-only and needs a C toolchain (CMake, plus NASM on Windows) to
+//! build, so `aws-lc-rs-resolver` enables snow's `std` feature. `ring-resolver` has neither
+//! requirement.
 //!
 //! ### Resolver primitives supported
 //!
-//! |                          | default          | ring               |
-//! | -----------------------: | :--------------: | :----------------: |
-//! |     CSPRNG               | ✔️               | ✔️                 |
-//! |      25519               | ✔️               | ✔️                 |
-//! |        448               |                  |                    |
-//! |      P-256<sup>🏁</sup>  | ✔️               |                    |
-//! |     AESGCM               | ✔️               | ✔️                 |
-//! | ChaChaPoly               | ✔️               | ✔️                 |
-//! | XChaChaPoly<sup>🏁</sup> | ✔️               |                    |
-//! |     SHA256               | ✔️               | ✔️                 |
-//! |     SHA512               | ✔️               | ✔️                 |
-//! |    BLAKE2s               | ✔️               |                    |
-//! |    BLAKE2b               | ✔️               |                    |
+//! |                          | default          | ring               | aws-lc-rs          |
+//! | -----------------------: | :--------------: | :----------------: | :----------------: |
+//! |     CSPRNG               | ✔️               | ✔️                 | ✔️                 |
+//! |      25519               | ✔️               | ✔️                 | ✔️                 |
+//! |        448               |                  |                    |                    |
+//! |      P-256<sup>🏁</sup>  | ✔️               |                    |                    |
+//! |     AESGCM               | ✔️               | ✔️                 | ✔️                 |
+//! | ChaChaPoly               | ✔️               | ✔️                 | ✔️                 |
+//! | XChaChaPoly<sup>🏁</sup> | ✔️               |                    |                    |
+//! |     SHA256               | ✔️               | ✔️                 | ✔️                 |
+//! |     SHA512               | ✔️               | ✔️                 | ✔️                 |
+//! |    BLAKE2s               | ✔️               |                    |                    |
+//! |    BLAKE2b               | ✔️               |                    |                    |
+//! |    BLAKE3                | ✔️               |                    |                    |
+//!
+//! The 25519 row is provided by the `default-resolver` fallback for both native backends —
+//! neither exposes an API `snow` can use for it — which is why the `-accelerated` features
+//! enable `use-curve25519`.
 //!
 //! 🏁 P-256 and XChaChaPoly are not in the official specification of Noise, and thus need to be enabled
 //! via the feature flags `use-p256` and `use-xchacha20poly1305`, respectively.
@@ -115,8 +135,8 @@
 //! By default, Snow uses the standard library, default crypto resolver and a selected collection
 //! of crypto primitives. To use Snow in `no_std` environments or make other kinds of customized
 //! setups, use Snow with `default-features = false`. This way you will individually select
-//! the components you wish to use. `default-resolver` is the only built-in resolver that
-//! currently supports `no_std`.
+//! the components you wish to use. `default-resolver` and `ring-resolver` support `no_std`;
+//! `aws-lc-rs-resolver` does not, as aws-lc-rs is std-only.
 //!
 //! To use a custom setup with `default-resolver`, enable your desired selection of cryptographic primitives:
 //!
@@ -167,13 +187,6 @@ extern crate alloc;
 compile_error!(
     "Valid selection of crypto primitived must be enabled when using feature 'default-resolver'.
     Enable at least one DH feature, one Cipher feature and one Hash feature. Check README.md for details."
-);
-
-// The two accelerated backends both provide the default `Builder::new` resolver, so only one
-// may be selected at a time. The individual `-resolver` features can still coexist.
-#[cfg(all(feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
-compile_error!(
-    "features 'ring-accelerated' and 'aws-lc-rs-accelerated' are mutually exclusive; enable at most one."
 );
 
 macro_rules! copy_slices {

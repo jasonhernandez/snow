@@ -48,7 +48,11 @@ impl PartialEq for Keypair {
 /// # use snow::Builder;
 /// # let my_long_term_key = [0u8; 32];
 /// # let their_pub_key = [0u8; 32];
-/// # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated", feature = "aws-lc-rs-accelerated"))]
+/// # #[cfg(any(
+/// #     feature = "default-resolver-crypto",
+/// #     feature = "ring-accelerated",
+/// #     feature = "aws-lc-rs-accelerated"
+/// # ))]
 /// let noise = Builder::new("Noise_XX_25519_ChaChaPoly_BLAKE2s".parse()?)
 ///     .local_private_key(&my_long_term_key)?
 ///     .remote_public_key(&their_pub_key)?
@@ -88,7 +92,12 @@ impl<'builder> Builder<'builder> {
     }
 
     /// Create a Builder with the ring resolver and default resolver as a fallback.
+    ///
+    /// Takes precedence over the aws-lc-rs variant below if both `-accelerated` features are
+    /// enabled: only one `Builder::new` can exist, and Cargo features have to stay additive,
+    /// so enabling both is resolved by this ordering rather than rejected.
     #[cfg(feature = "ring-accelerated")]
+    #[must_use]
     pub fn new(params: NoiseParams) -> Self {
         use crate::resolvers::{DefaultResolver, FallbackResolver, RingResolver};
 
@@ -100,6 +109,7 @@ impl<'builder> Builder<'builder> {
 
     /// Create a Builder with the aws-lc-rs resolver and default resolver as a fallback.
     #[cfg(all(feature = "aws-lc-rs-accelerated", not(feature = "ring-accelerated")))]
+    #[must_use]
     pub fn new(params: NoiseParams) -> Self {
         use crate::resolvers::{AwsLcRsResolver, DefaultResolver, FallbackResolver};
 

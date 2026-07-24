@@ -3,15 +3,15 @@
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 
+/// An aws-lc-rs primitive resolver.
+#[cfg(feature = "aws-lc-rs-resolver")]
+mod aws_lc_rs;
 /// The default primitive resolver.
 #[cfg(feature = "default-resolver")]
 mod default;
 /// A ring primitive resolver.
 #[cfg(feature = "ring-resolver")]
 mod ring;
-/// An aws-lc-rs primitive resolver.
-#[cfg(feature = "aws-lc-rs-resolver")]
-mod aws_lc_rs;
 
 #[cfg(feature = "hfs")]
 use crate::params::KemChoice;
@@ -22,12 +22,12 @@ use crate::{
     types::{Cipher, Dh, Hash, Random},
 };
 
+#[cfg(feature = "aws-lc-rs-resolver")]
+pub use self::aws_lc_rs::AwsLcRsResolver;
 #[cfg(feature = "default-resolver")]
 pub use self::default::DefaultResolver;
 #[cfg(feature = "ring-resolver")]
 pub use self::ring::RingResolver;
-#[cfg(feature = "aws-lc-rs-resolver")]
-pub use self::aws_lc_rs::AwsLcRsResolver;
 
 /// Boxed `CryptoResolver`
 pub type BoxedCryptoResolver = Box<dyn CryptoResolver + Send>;

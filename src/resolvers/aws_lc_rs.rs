@@ -1,3 +1,14 @@
+//! An `aws-lc-rs`-backed resolver.
+//!
+//! NB: this is intentionally a near-verbatim port of `resolvers::ring` — aws-lc-rs exposes a
+//! ring-compatible `aead`/`digest`/`rand` surface, so the two implementations are meant to stay
+//! in lockstep. Any fix to nonce construction, the in-place/copy branches of `decrypt`, or tag
+//! placement needs applying to both files. `tests/resolvers.rs` cross-checks them against the
+//! `default-resolver` to catch drift.
+//!
+//! Unlike `resolvers::ring`, this module is std-only (aws-lc-rs is), which is why
+//! `aws-lc-rs-resolver` enables snow's `std` feature and there's no `no_std` import path below.
+
 use super::CryptoResolver;
 use crate::{
     constants::{CIPHERKEYLEN, TAGLEN},
@@ -5,8 +16,6 @@ use crate::{
     types::{Cipher, Dh, Hash, Random},
     Error,
 };
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
 use aws_lc_rs::{
     aead::{self, LessSafeKey, UnboundKey},
     digest,
@@ -25,6 +34,15 @@ impl CryptoResolver for AwsLcRsResolver {
         Some(Box::new(AwsLcRsRng::default()))
     }
 
+    /// DH is deliberately left to the `default-resolver` fallback for now.
+    ///
+    /// Note this is *not* for ring's reason. ring can't implement `Dh` at all, because its
+    /// agreement API is ephemeral-only (`EphemeralPrivateKey` is consumed by `agree_ephemeral`),
+    /// which can't model a Noise static key. aws-lc-rs does expose a reusable
+    /// `agreement::PrivateKey` plus `X25519` and `ECDH_P256`, so a native implementation is
+    /// possible here — including P-256, which no native backend currently provides. It's left
+    /// out of this change because it wants its own known-answer vectors (RFC 7748 / RFC 5903)
+    /// rather than being smuggled in with the port.
     fn resolve_dh(&self, _choice: &DHChoice) -> Option<Box<dyn Dh>> {
         None
     }
@@ -74,7 +92,7 @@ struct CipherAESGCM {
 impl Default for CipherAESGCM {
     fn default() -> Self {
         CipherAESGCM {
-            key: LessSafeKey::new(UnboundKey::new(&aead::AES_256_GCM, &[0u8; 32]).unwrap()),
+            key: LessSafeKey::new(UnboundKey::new(&aead::AES_256_GCM, &[0_u8; 32]).unwrap()),
         }
     }
 }
@@ -89,7 +107,7 @@ impl Cipher for CipherAESGCM {
     }
 
     fn encrypt(&self, nonce: u64, authtext: &[u8], plaintext: &[u8], out: &mut [u8]) -> usize {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_be_bytes(), &mut nonce_bytes[4..]);
 
         out[..plaintext.len()].copy_from_slice(plaintext);
@@ -116,7 +134,7 @@ impl Cipher for CipherAESGCM {
         ciphertext: &[u8],
         out: &mut [u8],
     ) -> Result<usize, Error> {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_be_bytes(), &mut nonce_bytes[4..]);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
@@ -154,7 +172,7 @@ struct CipherChaChaPoly {
 impl Default for CipherChaChaPoly {
     fn default() -> Self {
         Self {
-            key: LessSafeKey::new(UnboundKey::new(&aead::CHACHA20_POLY1305, &[0u8; 32]).unwrap()),
+            key: LessSafeKey::new(UnboundKey::new(&aead::CHACHA20_POLY1305, &[0_u8; 32]).unwrap()),
         }
     }
 }
@@ -169,7 +187,7 @@ impl Cipher for CipherChaChaPoly {
     }
 
     fn encrypt(&self, nonce: u64, authtext: &[u8], plaintext: &[u8], out: &mut [u8]) -> usize {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_le_bytes(), &mut nonce_bytes[4..]);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
@@ -195,7 +213,7 @@ impl Cipher for CipherChaChaPoly {
         ciphertext: &[u8],
         out: &mut [u8],
     ) -> Result<usize, Error> {
-        let mut nonce_bytes = [0u8; 12];
+        let mut nonce_bytes = [0_u8; 12];
         copy_slices!(&nonce.to_le_bytes(), &mut nonce_bytes[4..]);
         let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
 
@@ -298,9 +316,6 @@ impl Hash for HashSHA512 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "std"))]
-    use alloc::{collections::BTreeSet, vec};
-    #[cfg(feature = "std")]
     use std::collections::BTreeSet;
 
     #[test]
@@ -308,7 +323,7 @@ mod tests {
         let mut samples = BTreeSet::new();
         let mut rng = AwsLcRsRng::default();
         for _ in 0..100_000 {
-            let mut buf = vec![0u8; 128];
+            let mut buf = vec![0_u8; 128];
             rng.try_fill_bytes(&mut buf).unwrap();
             assert!(samples.insert(buf));
         }

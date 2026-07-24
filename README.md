@@ -77,8 +77,15 @@ If you enable the `aws-lc-rs-accelerated` feature, Snow will default to choosing
 `aws-lc-rs`'s crypto implementations when available.
 
 > [!Note]
-> `ring-accelerated` and `aws-lc-rs-accelerated` are mutually exclusive, since both provide
-> the default `Builder::new` accelerated resolver. Enable at most one of them.
+> Both backends may be enabled at once — Cargo features are additive and are unified across the
+> dependency graph, so two unrelated crates in one build may each ask for a different one. Since
+> `Builder::new` can only construct one resolver, `ring-accelerated` takes precedence over
+> `aws-lc-rs-accelerated` when both are enabled; use `Builder::with_resolver()` to pick explicitly.
+
+> [!Note]
+> `aws-lc-rs` is std-only and needs a C toolchain (CMake, plus NASM on Windows x86/x86-64) to
+> build, so `aws-lc-rs-resolver` enables snow's `std` feature. `ring-resolver` has neither
+> requirement and still supports `no_std`.
 
 ### Resolver primitives supported
 
