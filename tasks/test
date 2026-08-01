@@ -25,3 +25,8 @@ $TEST $TARGET --no-default-features --features "default-resolver use-curve25519 
 $TEST $TARGET --no-default-features --features "default-resolver use-curve25519 use-sha2 use-chacha20poly1305"
 $TEST $TARGET --features "ring-resolver $COMMON_FEATURES"
 $TEST $TARGET --features "ring-accelerated $COMMON_FEATURES"
+$TEST $TARGET --features "aws-lc-rs-resolver $COMMON_FEATURES"
+$TEST $TARGET --features "aws-lc-rs-accelerated $COMMON_FEATURES"
+# Both native backends at once: exercises feature additivity (ring wins `Builder::new`) and lets
+# tests/resolvers.rs cross-check the two ring-compatible implementations against each other.
+$TEST $TARGET --features "ring-accelerated aws-lc-rs-resolver $COMMON_FEATURES"

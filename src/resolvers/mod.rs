@@ -3,6 +3,9 @@
 #[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 
+/// An aws-lc-rs primitive resolver.
+#[cfg(feature = "aws-lc-rs-resolver")]
+mod aws_lc_rs;
 /// The default primitive resolver.
 #[cfg(feature = "default-resolver")]
 mod default;
@@ -19,6 +22,8 @@ use crate::{
     types::{Cipher, Dh, Hash, Random},
 };
 
+#[cfg(feature = "aws-lc-rs-resolver")]
+pub use self::aws_lc_rs::AwsLcRsResolver;
 #[cfg(feature = "default-resolver")]
 pub use self::default::DefaultResolver;
 #[cfg(feature = "ring-resolver")]

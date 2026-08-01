@@ -1,5 +1,9 @@
 #![cfg(feature = "std")]
-#![cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated"))]
+#![cfg(any(
+    feature = "default-resolver-crypto",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 #![allow(clippy::needless_range_loop)]
 #![allow(clippy::shadow_reuse)]
 #![allow(non_snake_case)]

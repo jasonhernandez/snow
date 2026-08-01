@@ -13,7 +13,11 @@
 //! ```
 //! # use snow::Error;
 //! #
-//! # #[cfg(any(feature = "default-resolver-crypto", feature = "ring-accelerated"))]
+//! # #[cfg(any(
+//! #     feature = "default-resolver-crypto",
+//! #     feature = "ring-accelerated",
+//! #     feature = "aws-lc-rs-accelerated"
+//! # ))]
 //! # fn try_main() -> Result<(), Error> {
 //! static PATTERN: &'static str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 //!
@@ -43,7 +47,11 @@
 //! #     Ok(())
 //! # }
 //! #
-//! # #[cfg(not(any(feature = "default-resolver-crypto", feature = "ring-accelerated")))]
+//! # #[cfg(not(any(
+//! #     feature = "default-resolver-crypto",
+//! #     feature = "ring-accelerated",
+//! #     feature = "aws-lc-rs-accelerated"
+//! # )))]
 //! # fn try_main() -> Result<(), ()> { Ok(()) }
 //! #
 //! # fn main() {
@@ -60,33 +68,62 @@
 //!
 //! ### Other Providers
 //!
+//! Snow can optionally use a native crypto backend for acceleration. Two are supported,
+//! and you can choose whichever you prefer:
+//!
 //! #### ring
 //!
 //! [ring](https://github.com/briansmith/ring) is a crypto library based off of BoringSSL
 //! and is significantly faster than most of the pure-Rust implementations.
 //!
 //! If you enable the `ring-resolver` feature, Snow will include a `resolvers::ring` module
-//! as well as a `RingAcceleratedResolver` available to be used with
-//! `Builder::with_resolver()`.
+//! as well as a `RingResolver` available to be used with `Builder::with_resolver()`.
 //!
 //! If you enable the `ring-accelerated` feature, Snow will default to choosing `ring`'s
 //! crypto implementations when available.
 //!
+//! #### aws-lc-rs
+//!
+//! [aws-lc-rs](https://github.com/aws/aws-lc-rs) is a crypto library based off of AWS-LC
+//! and is significantly faster than most of the pure-Rust implementations.
+//!
+//! If you enable the `aws-lc-rs-resolver` feature, Snow will include a `resolvers::aws_lc_rs`
+//! module as well as an `AwsLcRsResolver` available to be used with
+//! `Builder::with_resolver()`.
+//!
+//! If you enable the `aws-lc-rs-accelerated` feature, Snow will default to choosing
+//! `aws-lc-rs`'s crypto implementations when available.
+//!
+//! Both backends can be enabled at the same time — Cargo features are additive and get unified
+//! across the dependency graph, so two unrelated crates in one build may each ask for a
+//! different one. Since `Builder::new` can only construct one resolver, `ring-accelerated`
+//! takes precedence over `aws-lc-rs-accelerated` when both are enabled. Use
+//! `Builder::with_resolver()` if you need to pick explicitly.
+//!
+//! Note that `aws-lc-rs` is std-only and needs a C toolchain (CMake, plus NASM on Windows) to
+//! build, so `aws-lc-rs-resolver` enables snow's `std` feature. `ring-resolver` has neither
+//! requirement.
+//!
 //! ### Resolver primitives supported
 //!
-//! |                          | default          | ring               |
-//! | -----------------------: | :--------------: | :----------------: |
-//! |     CSPRNG               | ✔️               | ✔️                 |
-//! |      25519               | ✔️               | ✔️                 |
-//! |        448               |                  |                    |
-//! |      P-256<sup>🏁</sup>  | ✔️               |                    |
-//! |     AESGCM               | ✔️               | ✔️                 |
-//! | ChaChaPoly               | ✔️               | ✔️                 |
-//! | XChaChaPoly<sup>🏁</sup> | ✔️               |                    |
-//! |     SHA256               | ✔️               | ✔️                 |
-//! |     SHA512               | ✔️               | ✔️                 |
-//! |    BLAKE2s               | ✔️               |                    |
-//! |    BLAKE2b               | ✔️               |                    |
+//! |                          | default          | ring               | aws-lc-rs          |
+//! | -----------------------: | :--------------: | :----------------: | :----------------: |
+//! |     CSPRNG               | ✔️               | ✔️                 | ✔️                 |
+//! |      25519               | ✔️               | ✔️                 | ✔️                 |
+//! |        448               |                  |                    |                    |
+//! |      P-256<sup>🏁</sup>  | ✔️               |                    |                    |
+//! |     AESGCM               | ✔️               | ✔️                 | ✔️                 |
+//! | ChaChaPoly               | ✔️               | ✔️                 | ✔️                 |
+//! | XChaChaPoly<sup>🏁</sup> | ✔️               |                    |                    |
+//! |     SHA256               | ✔️               | ✔️                 | ✔️                 |
+//! |     SHA512               | ✔️               | ✔️                 | ✔️                 |
+//! |    BLAKE2s               | ✔️               |                    |                    |
+//! |    BLAKE2b               | ✔️               |                    |                    |
+//! |    BLAKE3                | ✔️               |                    |                    |
+//!
+//! The 25519 row is provided by the `default-resolver` fallback for both native backends —
+//! neither exposes an API `snow` can use for it — which is why the `-accelerated` features
+//! enable `use-curve25519`.
 //!
 //! 🏁 P-256 and XChaChaPoly are not in the official specification of Noise, and thus need to be enabled
 //! via the feature flags `use-p256` and `use-xchacha20poly1305`, respectively.
@@ -98,8 +135,8 @@
 //! By default, Snow uses the standard library, default crypto resolver and a selected collection
 //! of crypto primitives. To use Snow in `no_std` environments or make other kinds of customized
 //! setups, use Snow with `default-features = false`. This way you will individually select
-//! the components you wish to use. `default-resolver` is the only built-in resolver that
-//! currently supports `no_std`.
+//! the components you wish to use. `default-resolver` and `ring-resolver` support `no_std`;
+//! `aws-lc-rs-resolver` does not, as aws-lc-rs is std-only.
 //!
 //! To use a custom setup with `default-resolver`, enable your desired selection of cryptographic primitives:
 //!
@@ -131,17 +168,20 @@ extern crate alloc;
     not(any(
         feature = "use-aes-gcm",
         feature = "use-chacha20poly1305",
-        // `default-resolver` and `ring-resolver` may be enabled at the same time
-        // when using the `ring-accelerated` feature. _ring_ provides AES-GCM and
-        // ChaChaPoly-1305 too, which are the only two required ciphers.
+        // `default-resolver` and an accelerated resolver may be enabled at the same time
+        // when using the `ring-accelerated`/`aws-lc-rs-accelerated` feature. Both _ring_ and
+        // _aws-lc-rs_ provide AES-GCM and ChaChaPoly-1305 too, which are the only two required
+        // ciphers.
         feature = "ring-resolver",
+        feature = "aws-lc-rs-resolver",
         feature = "use-xchacha20poly1305"
     )),
     not(any(
         feature = "use-sha2",
         feature = "use-blake2",
         feature = "use-blake3",
-        feature = "ring-resolver"
+        feature = "ring-resolver",
+        feature = "aws-lc-rs-resolver"
     ))
 ))]
 compile_error!(

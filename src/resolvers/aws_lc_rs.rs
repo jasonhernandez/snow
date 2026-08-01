@@ -1,8 +1,13 @@
-//! A `ring`-backed resolver.
+//! An `aws-lc-rs`-backed resolver.
 //!
-//! NB: `resolvers::aws_lc_rs` is a near-verbatim port of this module (aws-lc-rs exposes a
-//! ring-compatible API surface). The two are meant to stay in lockstep — a fix here almost
-//! certainly belongs there too.
+//! NB: this is intentionally a near-verbatim port of `resolvers::ring` — aws-lc-rs exposes a
+//! ring-compatible `aead`/`digest`/`rand` surface, so the two implementations are meant to stay
+//! in lockstep. Any fix to nonce construction, the in-place/copy branches of `decrypt`, or tag
+//! placement needs applying to both files. `tests/resolvers.rs` cross-checks them against the
+//! `default-resolver` to catch drift.
+//!
+//! Unlike `resolvers::ring`, this module is std-only (aws-lc-rs is), which is why
+//! `aws-lc-rs-resolver` enables snow's `std` feature and there's no `no_std` import path below.
 
 use super::CryptoResolver;
 use crate::{
@@ -11,26 +16,33 @@ use crate::{
     types::{Cipher, Dh, Hash, Random},
     Error,
 };
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-use ring::{
+use aws_lc_rs::{
     aead::{self, LessSafeKey, UnboundKey},
     digest,
     rand::{SecureRandom, SystemRandom},
 };
 
-/// A resolver that chooses [ring](https://github.com/briansmith/ring)-backed
+/// A resolver that chooses [aws-lc-rs](https://github.com/aws/aws-lc-rs)-backed
 /// primitives when available.
 #[allow(clippy::module_name_repetitions)]
 #[derive(Default)]
-pub struct RingResolver;
+pub struct AwsLcRsResolver;
 
-#[cfg(feature = "ring")]
-impl CryptoResolver for RingResolver {
+#[cfg(feature = "aws-lc-rs")]
+impl CryptoResolver for AwsLcRsResolver {
     fn resolve_rng(&self) -> Option<Box<dyn Random>> {
-        Some(Box::new(RingRng::default()))
+        Some(Box::new(AwsLcRsRng::default()))
     }
 
+    /// DH is deliberately left to the `default-resolver` fallback for now.
+    ///
+    /// Note this is *not* for ring's reason. ring can't implement `Dh` at all, because its
+    /// agreement API is ephemeral-only (`EphemeralPrivateKey` is consumed by `agree_ephemeral`),
+    /// which can't model a Noise static key. aws-lc-rs does expose a reusable
+    /// `agreement::PrivateKey` plus `X25519` and `ECDH_P256`, so a native implementation is
+    /// possible here — including P-256, which no native backend currently provides. It's left
+    /// out of this change because it wants its own known-answer vectors (RFC 7748 / RFC 5903)
+    /// rather than being smuggled in with the port.
     fn resolve_dh(&self, _choice: &DHChoice) -> Option<Box<dyn Dh>> {
         None
     }
@@ -55,17 +67,17 @@ impl CryptoResolver for RingResolver {
 
 // NB: Intentionally private so RNG details aren't leaked into
 // the public API.
-struct RingRng {
+struct AwsLcRsRng {
     rng: SystemRandom,
 }
 
-impl Default for RingRng {
+impl Default for AwsLcRsRng {
     fn default() -> Self {
         Self { rng: SystemRandom::new() }
     }
 }
 
-impl Random for RingRng {
+impl Random for AwsLcRsRng {
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error> {
         self.rng.fill(dest).map_err(|_| Error::Rng)
     }
@@ -73,7 +85,7 @@ impl Random for RingRng {
 
 struct CipherAESGCM {
     // NOTE: LessSafeKey is chosen here because nonce atomicity is handled outside of this structure.
-    // See ring documentation for more details on the naming choices.
+    // See aws-lc-rs documentation for more details on the naming choices.
     key: LessSafeKey,
 }
 
@@ -153,7 +165,7 @@ impl Cipher for CipherAESGCM {
 
 struct CipherChaChaPoly {
     // NOTE: LessSafeKey is chosen here because nonce atomicity is to be ensured outside of this structure.
-    // See ring documentation for more details on the naming choices.
+    // See aws-lc-rs documentation for more details on the naming choices.
     key: aead::LessSafeKey,
 }
 
@@ -304,15 +316,12 @@ impl Hash for HashSHA512 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "std"))]
-    use alloc::{collections::BTreeSet, vec};
-    #[cfg(feature = "std")]
     use std::collections::BTreeSet;
 
     #[test]
     fn test_randomness_sanity() {
         let mut samples = BTreeSet::new();
-        let mut rng = RingRng::default();
+        let mut rng = AwsLcRsRng::default();
         for _ in 0..100_000 {
             let mut buf = vec![0_u8; 128];
             rng.try_fill_bytes(&mut buf).unwrap();

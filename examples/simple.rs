@@ -1,5 +1,9 @@
 #![cfg_attr(
-    not(any(feature = "default-resolver", feature = "ring-accelerated",)),
+    not(any(
+        feature = "default-resolver",
+        feature = "ring-accelerated",
+        feature = "aws-lc-rs-accelerated"
+    )),
     allow(dead_code, unused_extern_crates, unused_imports)
 )]
 //! This is a barebones TCP Client/Server that establishes a `Noise_XX` session, and sends
@@ -20,7 +24,11 @@ static SECRET: &[u8; 32] = b"i don't care for fidget spinners";
 static PARAMS: LazyLock<NoiseParams> =
     LazyLock::new(|| "Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s".parse().unwrap());
 
-#[cfg(any(feature = "default-resolver", feature = "ring-accelerated"))]
+#[cfg(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 fn main() {
     let server_mode =
         std::env::args().next_back().is_none_or(|arg| arg == "-s" || arg == "--server");
@@ -33,7 +41,11 @@ fn main() {
     println!("all done.");
 }
 
-#[cfg(any(feature = "default-resolver", feature = "ring-accelerated"))]
+#[cfg(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 fn run_server() {
     let mut buf = vec![0_u8; 65535];
 
@@ -72,7 +84,11 @@ fn run_server() {
     println!("connection closed.");
 }
 
-#[cfg(any(feature = "default-resolver", feature = "ring-accelerated"))]
+#[cfg(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+))]
 fn run_client() {
     let mut buf = vec![0_u8; 65535];
 
@@ -130,7 +146,11 @@ fn send(stream: &mut TcpStream, buf: &[u8]) {
     stream.write_all(buf).unwrap();
 }
 
-#[cfg(not(any(feature = "default-resolver", feature = "ring-accelerated")))]
+#[cfg(not(any(
+    feature = "default-resolver",
+    feature = "ring-accelerated",
+    feature = "aws-lc-rs-accelerated"
+)))]
 fn main() {
     panic!("Example must be compiled with some cryptographic provider.");
 }

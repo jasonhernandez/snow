@@ -50,34 +50,59 @@ overview).
 
 ### Other Providers
 
+Snow can optionally use a native crypto backend for acceleration. Two are supported, and
+you can pick whichever you prefer via feature flags.
+
 #### ring
 
 [ring](https://github.com/briansmith/ring) is a crypto library based off of BoringSSL
 and is significantly faster than most of the pure-Rust implementations.
 
 If you enable the `ring-resolver` feature, Snow will include a `resolvers::ring` module
-as well as a `RingAcceleratedResolver` available to be used with
-`Builder::with_resolver()`.
+as well as a `RingResolver` available to be used with `Builder::with_resolver()`.
 
 If you enable the `ring-accelerated` feature, Snow will default to choosing `ring`'s
 crypto implementations when available.
 
+#### aws-lc-rs
+
+[aws-lc-rs](https://github.com/aws/aws-lc-rs) is a crypto library based off of AWS-LC
+and is significantly faster than most of the pure-Rust implementations.
+
+If you enable the `aws-lc-rs-resolver` feature, Snow will include a `resolvers::aws_lc_rs`
+module as well as an `AwsLcRsResolver` available to be used with
+`Builder::with_resolver()`.
+
+If you enable the `aws-lc-rs-accelerated` feature, Snow will default to choosing
+`aws-lc-rs`'s crypto implementations when available.
+
+> [!Note]
+> Both backends may be enabled at once — Cargo features are additive and are unified across the
+> dependency graph, so two unrelated crates in one build may each ask for a different one. Since
+> `Builder::new` can only construct one resolver, `ring-accelerated` takes precedence over
+> `aws-lc-rs-accelerated` when both are enabled; use `Builder::with_resolver()` to pick explicitly.
+
+> [!Note]
+> `aws-lc-rs` is std-only and needs a C toolchain (CMake, plus NASM on Windows x86/x86-64) to
+> build, so `aws-lc-rs-resolver` enables snow's `std` feature. `ring-resolver` has neither
+> requirement and still supports `no_std`.
+
 ### Resolver primitives supported
 
-|                                        |      default       |        ring        |
-| -------------------------------------: | :----------------: | :----------------: |
-|                                 CSPRNG | :heavy_check_mark: | :heavy_check_mark: |
-|                                  25519 | :heavy_check_mark: | :heavy_check_mark: |
-|                                    448 |                    |                    |
-|       P-256<sup>:checkered_flag:</sup> | :heavy_check_mark: |                    |
-|                                 AESGCM | :heavy_check_mark: | :heavy_check_mark: |
-|                             ChaChaPoly | :heavy_check_mark: | :heavy_check_mark: |
-| XChaChaPoly<sup>:checkered_flag:</sup> | :heavy_check_mark: |                    |
-|                                 SHA256 | :heavy_check_mark: | :heavy_check_mark: |
-|                                 SHA512 | :heavy_check_mark: | :heavy_check_mark: |
-|                                BLAKE2s | :heavy_check_mark: |                    |
-|                                BLAKE2b | :heavy_check_mark: |                    |
-|                                 BLAKE3 | :heavy_check_mark: |                    |
+|                                        |      default       |        ring        |     aws-lc-rs      |
+| -------------------------------------: | :----------------: | :----------------: | :----------------: |
+|                                 CSPRNG | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+|                                  25519 | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+|                                    448 |                    |                    |                    |
+|       P-256<sup>:checkered_flag:</sup> | :heavy_check_mark: |                    |                    |
+|                                 AESGCM | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+|                             ChaChaPoly | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+| XChaChaPoly<sup>:checkered_flag:</sup> | :heavy_check_mark: |                    |                    |
+|                                 SHA256 | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+|                                 SHA512 | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: |
+|                                BLAKE2s | :heavy_check_mark: |                    |                    |
+|                                BLAKE2b | :heavy_check_mark: |                    |                    |
+|                                 BLAKE3 | :heavy_check_mark: |                    |                    |
 
 > [!Note]
 > :checkered_flag: P-256 and XChaChaPoly are not in the official specification of Noise, and thus need to be enabled
