@@ -6,7 +6,7 @@ use crate::constants::{MAXKEMCTLEN, MAXKEMPUBLEN, MAXKEMSSLEN};
 use crate::types::Kem;
 use crate::{
     cipherstate::{CipherState, CipherStates},
-    constants::{MAXDHLEN, MAXMSGLEN, PSKLEN, TAGLEN},
+    constants::{MAX_PSKS, MAXDHLEN, MAXMSGLEN, PSKLEN, TAGLEN},
     error::{Error, InitStage, StateProblem},
     params::{DhToken, HandshakeTokens, MessagePatterns, NoiseParams, Token},
     stateless_transportstate::StatelessTransportState,
@@ -21,6 +21,37 @@ use core::{
     convert::{TryFrom, TryInto},
     fmt,
 };
+use zeroize::{Zeroize, Zeroizing};
+
+/// Pre-shared keys held by the handshake, zeroized on drop.
+///
+/// This is a newtype rather than a plain array because `HandshakeState` can't
+/// implement `Drop` itself (`TransportState::new` moves fields out of it), so
+/// the wipe of this secret material lives on the field instead.
+#[derive(Default)]
+pub(crate) struct Psks([Option<[u8; PSKLEN]>; MAX_PSKS]);
+
+impl core::ops::Deref for Psks {
+    type Target = [Option<[u8; PSKLEN]>; MAX_PSKS];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl core::ops::DerefMut for Psks {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for Psks {
+    fn drop(&mut self) {
+        // `Option<[u8; PSKLEN]>::zeroize` clears the residual space of the `Option` as well as
+        // the payload, so this doesn't leave a PSK behind in the unused enum bytes.
+        self.0.zeroize();
+    }
+}
 
 /// A state machine encompassing the handshake phase of a Noise session.
 ///
@@ -39,7 +70,7 @@ pub struct HandshakeState {
     pub(crate) re: Toggle<[u8; MAXDHLEN]>,
     pub(crate) initiator: bool,
     pub(crate) params: NoiseParams,
-    pub(crate) psks: [Option<[u8; PSKLEN]>; 10],
+    pub(crate) psks: Psks,
     #[cfg(feature = "hfs")]
     pub(crate) kem: Option<Box<dyn Kem>>,
     #[cfg(feature = "hfs")]
@@ -62,7 +93,7 @@ impl HandshakeState {
         re: Toggle<[u8; MAXDHLEN]>,
         initiator: bool,
         params: NoiseParams,
-        psks: &[Option<[u8; PSKLEN]>; 10],
+        psks: &[Option<[u8; PSKLEN]>; MAX_PSKS],
         prologue: &[u8],
         cipherstates: CipherStates,
     ) -> Result<HandshakeState, Error> {
@@ -142,7 +173,7 @@ impl HandshakeState {
             re,
             initiator,
             params,
-            psks: *psks,
+            psks: Psks(*psks),
             #[cfg(feature = "hfs")]
             kem: None,
             #[cfg(feature = "hfs")]
@@ -162,8 +193,13 @@ impl HandshakeState {
         self.kem = Some(kem);
     }
 
-    fn dh(&self, token: DhToken) -> Result<[u8; MAXDHLEN], Error> {
-        let mut dh_out = [0_u8; MAXDHLEN];
+    /// Perform a Diffie-Hellman exchange for `token`.
+    ///
+    /// The result is a raw shared secret — enough to recompute the chaining key and everything
+    /// derived from it — so it's returned in a `Zeroizing` wrapper rather than as a bare array
+    /// that would be left on the stack after the caller mixes it in.
+    fn dh(&self, token: DhToken) -> Result<Zeroizing<[u8; MAXDHLEN]>, Error> {
+        let mut dh_out = Zeroizing::new([0_u8; MAXDHLEN]);
         let (dh, key) = match (token, self.is_initiator()) {
             (DhToken::Ee, _) => (&self.e, &self.re),
             (DhToken::Ss, _) => (&self.s, &self.rs),
@@ -173,7 +209,7 @@ impl HandshakeState {
         if !(dh.is_on() && key.is_on()) {
             return Err(StateProblem::MissingKeyMaterial.into());
         }
-        dh.dh(&**key, &mut dh_out)?;
+        dh.dh(&**key, &mut *dh_out)?;
         Ok(dh_out)
     }
 
@@ -215,7 +251,7 @@ impl HandshakeState {
                 Ok(res)
             },
             Err(err) => {
-                self.symmetricstate.restore(checkpoint);
+                self.symmetricstate.restore(&checkpoint);
                 Err(err)
             },
         }
@@ -286,7 +322,7 @@ impl HandshakeState {
                 #[cfg(feature = "hfs")]
                 Token::Ekem1 => {
                     let kem = self.kem.as_mut().unwrap();
-                    let mut kem_output_buf = [0; MAXKEMSSLEN];
+                    let mut kem_output_buf = Zeroizing::new([0; MAXKEMSSLEN]);
                     let mut ciphertext_buf = [0; MAXKEMCTLEN];
 
                     if kem.ciphertext_len() > message.len() {
@@ -342,7 +378,7 @@ impl HandshakeState {
                 Ok(res)
             },
             Err(err) => {
-                self.symmetricstate.restore(checkpoint);
+                self.symmetricstate.restore(&checkpoint);
                 Err(err)
             },
         }
@@ -430,7 +466,7 @@ impl HandshakeState {
                     let mut ciphertext_buf = [0; MAXKEMCTLEN];
                     let ciphertext = &mut ciphertext_buf[..kem.ciphertext_len()];
                     self.symmetricstate.decrypt_and_mix_hash(&ptr[..read_len], ciphertext)?;
-                    let mut kem_output_buf = [0; MAXKEMSSLEN];
+                    let mut kem_output_buf = Zeroizing::new([0; MAXKEMSSLEN]);
                     let kem_output = &mut kem_output_buf[..kem.shared_secret_len()];
                     kem.decapsulate(ciphertext, kem_output)?;
                     self.symmetricstate.mix_key(&kem_output[..kem.shared_secret_len()]);
@@ -509,8 +545,12 @@ impl HandshakeState {
     /// feature has to be enabled to use this function.
     #[cfg(feature = "risky-raw-split")]
     pub fn dangerously_get_raw_split(&mut self) -> ([u8; CIPHERKEYLEN], [u8; CIPHERKEYLEN]) {
-        let mut output = ([0u8; MAXHASHLEN], [0u8; MAXHASHLEN]);
-        self.symmetricstate.split_raw(&mut output.0, &mut output.1);
+        let mut output = Zeroizing::new(([0u8; MAXHASHLEN], [0u8; MAXHASHLEN]));
+        {
+            // Deref the wrapper once; splitting the borrow through `DerefMut` twice won't compile.
+            let out = &mut *output;
+            self.symmetricstate.split_raw(&mut out.0, &mut out.1);
+        }
         (output.0[..CIPHERKEYLEN].try_into().unwrap(), output.1[..CIPHERKEYLEN].try_into().unwrap())
     }
 
@@ -536,5 +576,35 @@ impl HandshakeState {
 impl fmt::Debug for HandshakeState {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("HandshakeState").finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Psks` exists solely to carry a destructor, since `HandshakeState` can't have one. If
+    /// that `Drop` impl is ever removed, `needs_drop` goes false — the inner array wouldn't
+    /// drop anything on its own — and the PSKs stop being wiped.
+    #[test]
+    fn test_psks_has_destructor() {
+        assert!(
+            core::mem::needs_drop::<Psks>(),
+            "Psks lost its Drop impl, so pre-shared keys are no longer zeroized"
+        );
+    }
+
+    /// Check that the destructor targets the field that actually holds the PSKs, so renaming
+    /// or retyping it can't quietly leave the wipe pointing at the wrong data.
+    ///
+    /// Note what this does *not* cover: whether the `Option`'s discriminant and padding are
+    /// cleared as well as the payload. That's a documented property of `zeroize`'s `Option`
+    /// impl (since 1.3.0) and isn't observable from safe code, so we rely on the version
+    /// floor in `Cargo.toml` for it rather than pretending to test it here.
+    #[test]
+    fn test_psks_zeroize_clears_every_slot() {
+        let mut psks = Psks([Some([0x24; PSKLEN]); MAX_PSKS]);
+        psks.0.zeroize();
+        assert!(psks.iter().all(Option::is_none), "every PSK slot should be cleared");
     }
 }

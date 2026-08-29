@@ -58,6 +58,33 @@
 //! it chooses select, artisanal pure-Rust implementations (see `Cargo.toml` for a quick
 //! overview).
 //!
+//! ## Zeroization
+//!
+//! Secret key material is zeroized when the state that owns it is dropped, so it doesn't
+//! linger in freed memory after a session ends. This covers the symmetric chaining key,
+//! pre-shared keys, DH private keys, Diffie-Hellman outputs, derived cipher keys, and the
+//! intermediate buffers used to derive them — regardless of which resolver is in use, since
+//! most of that material lives in resolver-independent parts of the state machine.
+//!
+//! Two exceptions, both cases where a backend owns the memory and snow can't reach into it:
+//!
+//! - The `ring` and `aws-lc-rs` ciphers hold their keys inside those crates' opaque key
+//!   types. DH under those resolvers still comes from the `default-resolver` via the
+//!   fallback, so DH private keys *are* zeroized even there — it's specifically the AEAD
+//!   keys that aren't.
+//! - The Kyber1024 KEM private key is an opaque `pqcrypto` type with no mutable byte access.
+//!
+//! [`Keypair`](struct.Keypair.html) — the long-term keypair handed back by
+//! [`Builder::generate_keypair()`](struct.Builder.html#method.generate_keypair) — is *not*
+//! zeroized on drop, because adding a destructor to a public struct would stop callers from
+//! destructuring it. Wrap it in [`zeroize::Zeroizing`] if you need that.
+//!
+//! Note that the `Zeroize`/`ZeroizeOnDrop` marker traits are deliberately not implemented for
+//! the public state types. `ZeroizeOnDrop` is a promise that *all* contained secrets are
+//! wiped, which wouldn't be true for a `TransportState` built on the `ring` or `aws-lc-rs`
+//! ciphers, and the resolver is chosen at runtime — so the trait can't be implemented
+//! honestly for the type as a whole.
+//!
 //! ### Other Providers
 //!
 //! #### ring

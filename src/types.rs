@@ -4,6 +4,7 @@ use crate::{
     constants::{CIPHERKEYLEN, MAXBLOCKLEN, MAXHASHLEN, TAGLEN},
     Error,
 };
+use zeroize::Zeroizing;
 
 /// CSPRNG operations
 pub trait Random: Send + Sync {
@@ -78,12 +79,14 @@ pub trait Cipher: Send + Sync {
     /// Rekey according to Section 4.2 of the Noise Specification, with a default
     /// implementation guaranteed to be secure for all ciphers.
     fn rekey(&mut self) {
-        let mut ciphertext = [0; CIPHERKEYLEN + TAGLEN];
-        let ciphertext_len = self.encrypt(u64::MAX, &[], &[0; CIPHERKEYLEN], &mut ciphertext);
+        // The "ciphertext" here is the new key, so both buffers hold secret material and are
+        // wiped when they leave scope.
+        let mut ciphertext = Zeroizing::new([0; CIPHERKEYLEN + TAGLEN]);
+        let ciphertext_len = self.encrypt(u64::MAX, &[], &[0; CIPHERKEYLEN], &mut *ciphertext);
         assert_eq!(ciphertext_len, ciphertext.len(), "unexpected ciphertext length for rekey");
 
         // TODO(mcginty): use `split_array_ref` once stable to avoid memory inefficiency
-        let mut key = [0_u8; CIPHERKEYLEN];
+        let mut key = Zeroizing::new([0_u8; CIPHERKEYLEN]);
         key.copy_from_slice(&ciphertext[..CIPHERKEYLEN]);
 
         self.set(&key);

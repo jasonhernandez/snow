@@ -10,8 +10,10 @@ use snow::{
     Builder, Error,
 };
 
+use core::sync::atomic::{AtomicUsize, Ordering};
 use rand_core::{impls, RngCore};
 use snow::{params::*, types::*};
+use std::sync::Arc;
 use x25519_dalek as x25519;
 
 type TestResult = Result<(), Box<dyn core::error::Error>>;
@@ -953,5 +955,110 @@ fn test_stateful_nonce_increment_behavior() -> TestResult {
 
     // This should now fail again as the nonce counter should have incremented
     assert!(h_r.read_message(&buffer_msg[..len], &mut buffer_out).is_err());
+    Ok(())
+}
+
+/// A `Cipher` that delegates to a real implementation but records its own destruction.
+///
+/// Used to verify the *transitive* half of snow's zeroization guarantee: the concrete cipher
+/// objects wipe their keys in `Drop`, so what actually has to hold is that dropping an owning
+/// state (`TransportState` and friends) reaches those leaves. That chain runs through
+/// `Box<dyn Cipher>` → `CipherState` → `CipherStates` → `TransportState`, none of which is
+/// public, so it can't be checked by construction from outside the crate — but it can be
+/// observed, which is what this does.
+struct DropRecordingCipher {
+    inner: Box<dyn Cipher>,
+    drops: Arc<AtomicUsize>,
+}
+
+impl Cipher for DropRecordingCipher {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+
+    fn set(&mut self, key: &[u8; 32]) {
+        self.inner.set(key);
+    }
+
+    fn encrypt(&self, nonce: u64, authtext: &[u8], plaintext: &[u8], out: &mut [u8]) -> usize {
+        self.inner.encrypt(nonce, authtext, plaintext, out)
+    }
+
+    fn decrypt(
+        &self,
+        nonce: u64,
+        authtext: &[u8],
+        ciphertext: &[u8],
+        out: &mut [u8],
+    ) -> Result<usize, Error> {
+        self.inner.decrypt(nonce, authtext, ciphertext, out)
+    }
+}
+
+impl Drop for DropRecordingCipher {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Hands out `DropRecordingCipher`s; everything else comes from the default resolver.
+struct DropRecordingResolver {
+    drops: Arc<AtomicUsize>,
+}
+
+impl CryptoResolver for DropRecordingResolver {
+    fn resolve_rng(&self) -> Option<Box<dyn Random>> {
+        DefaultResolver.resolve_rng()
+    }
+
+    fn resolve_dh(&self, choice: &DHChoice) -> Option<Box<dyn Dh>> {
+        DefaultResolver.resolve_dh(choice)
+    }
+
+    fn resolve_hash(&self, choice: &HashChoice) -> Option<Box<dyn Hash>> {
+        DefaultResolver.resolve_hash(choice)
+    }
+
+    fn resolve_cipher(&self, choice: &CipherChoice) -> Option<Box<dyn Cipher>> {
+        let inner = DefaultResolver.resolve_cipher(choice)?;
+        Some(Box::new(DropRecordingCipher { inner, drops: Arc::clone(&self.drops) }))
+    }
+}
+
+/// Dropping a `TransportState` must drop the ciphers holding the transport keys, which is what
+/// triggers the zeroization implemented in `resolvers::default`. Guards against the chain being
+/// broken by, say, a `mem::forget` or a `ManuallyDrop` appearing in the split/transition path.
+#[test]
+fn test_transport_drop_wipes_cipher_keys() -> TestResult {
+    let drops = Arc::new(AtomicUsize::new(0));
+    let params: NoiseParams = "Noise_NN_25519_ChaChaPoly_SHA256".parse()?;
+
+    let mut initiator = Builder::with_resolver(
+        params.clone(),
+        Box::new(DropRecordingResolver { drops: Arc::clone(&drops) }),
+    )
+    .build_initiator()?;
+    let mut responder = Builder::new(params).build_responder()?;
+
+    // Run the NN handshake to completion so the transport keys actually get split out.
+    let (mut buf_i, mut buf_r) = ([0_u8; 1024], [0_u8; 1024]);
+    let len = initiator.write_message(&[], &mut buf_i)?;
+    responder.read_message(&buf_i[..len], &mut buf_r)?;
+    let len = responder.write_message(&[], &mut buf_r)?;
+    initiator.read_message(&buf_r[..len], &mut buf_i)?;
+
+    let initiator = initiator.into_transport_mode()?;
+    let observed_before_drop = drops.load(Ordering::SeqCst);
+
+    drop(initiator);
+
+    // The handshake resolves one cipher for the handshake state and two for the transport
+    // pair, so the final count must exceed whatever had already been dropped in transition.
+    let observed_after_drop = drops.load(Ordering::SeqCst);
+    assert!(
+        observed_after_drop > observed_before_drop,
+        "dropping a TransportState must drop its ciphers (before: {observed_before_drop}, \
+         after: {observed_after_drop}) — the leaf zeroization never runs otherwise"
+    );
     Ok(())
 }
